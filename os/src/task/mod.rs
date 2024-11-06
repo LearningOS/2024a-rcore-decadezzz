@@ -14,12 +14,15 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::syscall::process::TaskInfo;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
+use crate::mm::page_table::translated_data_mut;
+use crate::timer::get_time_ms;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
@@ -79,6 +82,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
+        next_task.time=get_time_ms();
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -140,6 +144,9 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            if inner.tasks[next].time==0{
+             inner.tasks[next].time=get_time_ms(); 
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -153,6 +160,35 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+    /// 统计系统调用次数
+    pub fn count_syscall(&self,num:usize){
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_times[num]+=1;
+    }
+
+    /// 获得任务信息
+    pub fn get_task_info(&self,_ti: *mut TaskInfo){
+        let  inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let ptr=translated_data_mut(current_user_token(),_ti);
+        *ptr=TaskInfo{
+            status:TaskStatus::Running,
+            syscall_times:inner.tasks[current].syscall_times.clone(),
+            time:get_time_ms()-inner.tasks[current].time,
+        }    
+    } 
+    fn mmap(&self, start: usize, len: usize, port: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        inner.tasks[current_task].memory_set.mmap(start, len, port)
+    }
+
+    fn munmap(&self, start: usize, len: usize) -> isize {
+        let mut inner = self.inner.exclusive_access();
+        let current_task = inner.current_task;
+        inner.tasks[current_task].memory_set.unmmap(start, len)
+    }   
 }
 
 /// Run the first task in task list.
@@ -201,4 +237,21 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+/// 统计系统调用次数
+pub fn count_syscall(num:usize){
+    TASK_MANAGER.count_syscall(num);
+}
+/// 获得任务信息
+pub fn get_task_info(_ti: *mut TaskInfo) {
+    TASK_MANAGER.get_task_info(_ti)
+}
+/// select_cur_task_to_mmap
+pub fn select_cur_task_to_mmap(start: usize, len: usize, port: usize) -> isize {
+    TASK_MANAGER.mmap(start, len, port)
+}
+
+/// select_cur_task_to_mmap
+pub fn select_cur_task_to_munmap(start: usize, len: usize) -> isize {
+    TASK_MANAGER.munmap(start, len)
 }

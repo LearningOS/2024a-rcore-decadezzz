@@ -26,7 +26,7 @@ const SYSCALL_MMAP: usize = 222;
 const SYSCALL_TASK_INFO: usize = 410;
 
 mod fs;
-mod process;
+pub mod process;
 
 use fs::*;
 use process::*;

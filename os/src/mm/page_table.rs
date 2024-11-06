@@ -4,17 +4,26 @@ use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPag
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
+use super::address::PhysAddr;
 
 bitflags! {
     /// page table entry flags
     pub struct PTEFlags: u8 {
+        ///读
         const V = 1 << 0;
+        ///读
         const R = 1 << 1;
+        ///写
         const W = 1 << 2;
+        ///取指
         const X = 1 << 3;
+        ///用户态访问
         const U = 1 << 4;
+        /// ignore
         const G = 1 << 5;
+        ///Accessed
         const A = 1 << 6;
+        ///Dirty
         const D = 1 << 7;
     }
 }
@@ -170,4 +179,19 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         start = end_va.into();
     }
     v
+}
+
+///获取应用数据地址引用
+pub fn translated_data_mut<T>(token: usize,ptr: *mut T)->&'static mut T{
+    let page_table = PageTable::from_token(token);
+
+    let va = VirtAddr::from(ptr as usize);
+    let page_off = va.page_offset();
+
+    let vpn = va.floor();
+
+    let mut pa: PhysAddr = page_table.translate(vpn).unwrap().ppn().into();
+    pa.0 += page_off;
+
+    pa.get_mut()
 }
