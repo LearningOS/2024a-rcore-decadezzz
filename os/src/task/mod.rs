@@ -13,7 +13,7 @@ mod context;
 mod switch;
 #[allow(clippy::module_inception)]
 mod task;
-
+use crate::config::MAX_SYSCALL_NUM;
 use crate::syscall::process::TaskInfo;
 use crate::loader::{get_app_data, get_num_app};
 use crate::sync::UPSafeCell;
@@ -173,10 +173,10 @@ impl TaskManager {
         let current = inner.current_task;
         let ptr=translated_data_mut(current_user_token(),_ti);
         *ptr=TaskInfo{
-            status:TaskStatus::Running,
+            status:inner.tasks[current].task_status.clone(),
             syscall_times:inner.tasks[current].syscall_times.clone(),
             time:get_time_ms()-inner.tasks[current].time,
-        }    
+        };  
     } 
     fn mmap(&self, start: usize, len: usize, port: usize) -> isize {
         let mut inner = self.inner.exclusive_access();
@@ -189,6 +189,16 @@ impl TaskManager {
         let current_task = inner.current_task;
         inner.tasks[current_task].memory_set.unmmap(start, len)
     }   
+    fn get_sys_call_times(&self) -> [u32; MAX_SYSCALL_NUM] {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].syscall_times.clone()
+    }
+
+    fn get_task_run_times(&self) -> usize {
+        let curr_time = get_time_ms();
+        let inner = self.inner.exclusive_access();
+        curr_time - inner.tasks[inner.current_task].time
+    }
 }
 
 /// Run the first task in task list.
@@ -254,4 +264,13 @@ pub fn select_cur_task_to_mmap(start: usize, len: usize, port: usize) -> isize {
 /// select_cur_task_to_mmap
 pub fn select_cur_task_to_munmap(start: usize, len: usize) -> isize {
     TASK_MANAGER.munmap(start, len)
+}
+/// return the sys count array of the current task
+pub fn get_sys_call_times() -> [u32; MAX_SYSCALL_NUM] {
+    TASK_MANAGER.get_sys_call_times()
+}
+
+/// return the sys count array of the current task
+pub fn get_task_run_times() -> usize {
+    TASK_MANAGER.get_task_run_times()
 }
