@@ -34,7 +34,10 @@ lazy_static! {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
+<<<<<<< HEAD
     map_tree: BTreeMap<VirtPageNum, FrameTracker>,
+=======
+>>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
 }
 
 impl MemorySet {
@@ -43,7 +46,10 @@ impl MemorySet {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
+<<<<<<< HEAD
             map_tree: BTreeMap::new(),
+=======
+>>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
         }
     }
     /// Get the page table token
@@ -302,6 +308,7 @@ impl MemorySet {
             false
         }
     }
+<<<<<<< HEAD
      /// mmap
      pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
         let va_start: VirtAddr = start.into();
@@ -381,6 +388,8 @@ impl MemorySet {
         }
         0
     }
+=======
+>>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
