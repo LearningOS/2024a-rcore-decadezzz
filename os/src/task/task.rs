@@ -5,10 +5,7 @@ use crate::config::TRAP_CONTEXT_BASE;
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
-<<<<<<< HEAD
 use crate::config::{MAX_SYSCALL_NUM,BIG_STRIDE};
-=======
->>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
@@ -38,14 +35,11 @@ impl TaskControlBlock {
         let inner = self.inner_exclusive_access();
         inner.memory_set.token()
     }
-<<<<<<< HEAD
     /// update_stride
     pub fn update_stride(&self) {
         let mut var = self.inner_exclusive_access();
         var.cur_stride += BIG_STRIDE / var.pro_lev;
     }
-=======
->>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
 }
 
 pub struct TaskControlBlockInner {
@@ -80,7 +74,6 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
-<<<<<<< HEAD
     
     /// syscall time count
     pub sys_call_times: [u32; MAX_SYSCALL_NUM],
@@ -93,8 +86,6 @@ pub struct TaskControlBlockInner {
 
     /// 优先级等级
     pub pro_lev: usize,
-=======
->>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
 }
 
 impl TaskControlBlockInner {
@@ -163,13 +154,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
-<<<<<<< HEAD
                     sys_call_times: [0; MAX_SYSCALL_NUM],
                     sys_call_begin: 0,
                     cur_stride: 0,
                     pro_lev: 16,
-=======
->>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
                 })
             },
         };
@@ -243,13 +231,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
-<<<<<<< HEAD
                     sys_call_times: [0; MAX_SYSCALL_NUM],
                     sys_call_begin: 0,
                     cur_stride: 0,
                     pro_lev: parent_inner.pro_lev,
-=======
->>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
                 })
             },
         });
