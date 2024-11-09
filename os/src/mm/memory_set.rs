@@ -302,7 +302,6 @@ impl MemorySet {
             false
         }
     }
-<<<<<<< HEAD
      /// mmap
      pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
         let va_start: VirtAddr = start.into();
@@ -382,8 +381,6 @@ impl MemorySet {
         }
         0
     }
-=======
->>>>>>> e6cc075c0a94713aead9b7c6adfa1d7642eab960
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
