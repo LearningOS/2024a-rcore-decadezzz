@@ -7,8 +7,11 @@ use crate::{
     mm::{translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next, TaskStatus,
+        suspend_current_and_run_next, TaskStatus, get_sys_call_times,
+        get_task_run_times,select_cur_task_to_mmap,
+        select_cur_task_to_munmap,TaskControlBlock
     },
+    timer::get_time_us,
 };
 
 #[repr(C)]
@@ -122,7 +125,13 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let us = get_time_us();
+    let ts = translated_refmut(current_user_token(), _ts);
+    *ts = TimeVal {
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
@@ -133,16 +142,30 @@ pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
         "kernel:pid[{}] sys_task_info NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let ti = translated_refmut(current_user_token(), _ti);
+
+    *ti = TaskInfo {
+        status: TaskStatus::Running,
+        syscall_times: get_sys_call_times(),
+        time: get_task_run_times(),
+    };
+    0
 }
 
 /// YOUR JOB: Implement mmap.
 pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+    if _len == 0 {
+        return 0;
+    }
+    if _port & !0x7 != 0 || _port & 0x7 == 0 {
+        return -1;
+    }
     trace!(
         "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    select_cur_task_to_mmap(_start, _len, _port)
+    
 }
 
 /// YOUR JOB: Implement munmap.
@@ -151,7 +174,7 @@ pub fn sys_munmap(_start: usize, _len: usize) -> isize {
         "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    select_cur_task_to_munmap(_start, _len)
 }
 
 /// change data segment size
@@ -171,6 +194,25 @@ pub fn sys_spawn(_path: *const u8) -> isize {
         "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
+    let current_task = current_task();
+    if current_task.is_none() {
+        return -1;
+    }
+
+    let current_task = current_task.unwrap();
+
+    let mut current_inner = current_task.inner_exclusive_access();
+
+    let token = current_inner.memory_set.token();
+    let path = translated_str(token, _path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let child_block = Arc::new(TaskControlBlock::new(data));
+        let mut child_inner = child_block.inner_exclusive_access();
+        child_inner.parent = Some(Arc::downgrade(&current_task));
+        current_inner.children.push(child_block.clone());
+        add_task(child_block.clone());
+        return child_block.pid.0 as isize;
+    }
     -1
 }
 
@@ -180,5 +222,10 @@ pub fn sys_set_priority(_prio: isize) -> isize {
         "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    if _prio < 2 {
+        return -1;
+    }
+    current_task().unwrap().inner_exclusive_access().pro_lev = _prio as usize;
+    _prio
+
 }
