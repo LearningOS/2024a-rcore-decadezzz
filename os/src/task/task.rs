@@ -1,16 +1,17 @@
 //! Types related to task management & Functions for completely changing TCB
-use super::TaskContext;
+use super::{current_task, TaskContext,add_task};
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::fs::{File, Stdin, Stdout};
 use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
-
+use crate::config::MAX_SYSCALL_NUM;
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -71,6 +72,18 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// syscall time count
+    pub sys_call_times: [u32; MAX_SYSCALL_NUM],
+
+    /// begen time
+    pub sys_call_begin: usize,
+
+    /// 当前 stride
+    pub cur_stride: usize,
+
+    /// 优先级等级
+    pub pro_lev: usize,
 }
 
 impl TaskControlBlockInner {
@@ -93,6 +106,26 @@ impl TaskControlBlockInner {
             self.fd_table.push(None);
             self.fd_table.len() - 1
         }
+    }
+    pub fn increase_sys_call(&mut self, sys_id: usize) {
+        self.sys_call_times[sys_id] += 1;
+ 
+    }
+
+    pub fn get_sys_call_times(&self) -> [u32; MAX_SYSCALL_NUM] {
+        self.sys_call_times.clone()
+    }
+
+    pub fn get_task_run_times(&self) -> usize {
+        get_time_ms()-self.sys_call_begin
+    }
+
+    pub fn mmap(&mut self, start: usize, len: usize, port: usize) -> isize {
+        self.memory_set.mmap(start, len, port)
+    }
+
+    pub fn munmap(&mut self, start: usize, len: usize) -> isize {
+        self.memory_set.unmmap(start, len)
     }
 }
 
@@ -135,6 +168,10 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    sys_call_times: [0; MAX_SYSCALL_NUM],
+                    sys_call_begin: 0,
+                    cur_stride: 0,
+                    pro_lev: 16,
                 })
             },
         };
@@ -216,6 +253,10 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    sys_call_times: parent_inner.sys_call_times.clone(),
+                    sys_call_begin: 0,
+                    cur_stride: 0,
+                    pro_lev: parent_inner.pro_lev,
                 })
             },
         });
@@ -261,6 +302,19 @@ impl TaskControlBlock {
             None
         }
     }
+    /// spawn
+pub fn _spawn(&self,data: &[u8])->isize{
+    
+    let _current_task = self;
+    let mut current_inner = _current_task.inner_exclusive_access();
+    let child_block = Arc::new(TaskControlBlock::new(data));
+    let mut child_inner = child_block.inner_exclusive_access();
+    child_inner.parent = Some(Arc::downgrade(&current_task().unwrap()));
+    current_inner.children.push(child_block.clone());
+    add_task(child_block.clone());
+    return child_block.pid.0 as isize;
+}
+
 }
 
 #[derive(Copy, Clone, PartialEq)]

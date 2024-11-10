@@ -1,3 +1,6 @@
+
+use crate::BLOCK_SZ;
+
 use super::{
     block_cache_sync_all, get_block_cache, BlockDevice, DirEntry, DiskInode, DiskInodeType,
     EasyFileSystem, DIRENT_SZ,
@@ -41,6 +44,7 @@ impl Inode {
             .lock()
             .modify(self.block_offset, f)
     }
+
     /// Find inode under a disk inode by name
     fn find_inode_id(&self, name: &str, disk_inode: &DiskInode) -> Option<u32> {
         // assert it is a directory
@@ -58,6 +62,7 @@ impl Inode {
         }
         None
     }
+
     /// Find inode under current inode by name
     pub fn find(&self, name: &str) -> Option<Arc<Inode>> {
         let fs = self.fs.lock();
@@ -73,6 +78,123 @@ impl Inode {
             })
         })
     }
+
+    /// Find inode under a disk inode by name
+    fn find_inode_and_pop(&self, name: &str, disk_inode: &mut DiskInode) -> Option<u32> {
+        // assert it is a directory
+        assert!(disk_inode.is_dir());
+        let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+        let mut dirent = DirEntry::empty();
+        for i in 0..file_count {
+            assert_eq!(
+                disk_inode.read_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device),
+                DIRENT_SZ,
+            );
+            if dirent.name() == name {
+                // 先保存要删除的目录项指向的inode编号
+                let r = Some(dirent.inode_id);
+                if i == file_count - 1 {
+                    // 要删除的是最后一个
+                    disk_inode.size -= 1;
+                } else {
+                    // 读取最后一个记录
+                    disk_inode.read_at(
+                        DIRENT_SZ * (file_count - 1),
+                        dirent.as_bytes_mut(),
+                        &self.block_device,
+                    );
+                    // 覆盖要删除的位置
+                    disk_inode.write_at(DIRENT_SZ * i, dirent.as_bytes_mut(), &self.block_device);
+                    disk_inode.size -= 1;
+                }
+                return r;
+            }
+        }
+        None
+    }
+
+    /// add_link
+    pub fn add_link(&self, old_name: &str, new_name: &str) -> isize {
+        let mut fs = self.fs.lock();
+        let inode_id = self.read_disk_inode(|disk_inode| self.find_inode_id(old_name, disk_inode));
+        if inode_id.is_none() {
+            return -1;
+        }
+        let inode_id = inode_id.unwrap();
+
+        self.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            // write dirent
+            let dirent = DirEntry::new(new_name, inode_id);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+
+        let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
+
+        let node = Arc::new(Self::new(
+            block_id,
+            block_offset,
+            self.fs.clone(),
+            self.block_device.clone(),
+        ));
+
+        node.modify_disk_inode(|disk_inode| {
+            // 增加引用计数
+            disk_inode.increase_refcont();
+        });
+        block_cache_sync_all();
+        0
+    }
+
+    /// remove_link
+    pub fn remove_link(&self, name: &str) -> isize {
+        let mut fs = self.fs.lock();
+        let inode = self.modify_disk_inode(|disk_inode| self.find_inode_and_pop(name, disk_inode));
+
+        if inode.is_none() {
+            // 链接不存在
+            return -1;
+        }
+        // 要删除的目录项(硬链接)指向的inode编号
+        let inode_id = inode.unwrap();
+
+        // 获取这个inode的位置
+        let (block_id, block_offset) = fs.get_disk_inode_pos(inode_id);
+
+        // 获取这个inode
+        let node = Arc::new(Self::new(
+            block_id,
+            block_offset,
+            self.fs.clone(),
+            self.block_device.clone(),
+        ));
+
+        node.modify_disk_inode(|disk_inode| {
+            // 减少引用计数
+            disk_inode.decrease_refcont();
+            if disk_inode.can_remove() {
+                // 删除文件
+                let size = disk_inode.size;
+                let data_blocks_dealloc = disk_inode.clear_size(&self.block_device);
+                assert!(data_blocks_dealloc.len() == DiskInode::total_blocks(size) as usize);
+                for data_block in data_blocks_dealloc.into_iter() {
+                    fs.dealloc_data(data_block);
+                }
+            }
+        });
+
+        block_cache_sync_all();
+        0
+    }
+
     /// Increase the size of a disk inode
     fn increase_size(
         &self,
@@ -90,6 +212,7 @@ impl Inode {
         }
         disk_inode.increase_size(new_size, v, &self.block_device);
     }
+
     /// Create inode under current inode by name
     pub fn create(&self, name: &str) -> Option<Arc<Inode>> {
         let mut fs = self.fs.lock();
@@ -170,6 +293,7 @@ impl Inode {
         block_cache_sync_all();
         size
     }
+
     /// Clear the data in current inode
     pub fn clear(&self) {
         let mut fs = self.fs.lock();
@@ -182,5 +306,32 @@ impl Inode {
             }
         });
         block_cache_sync_all();
+    }
+
+    /// fstat_statmode
+    pub fn fstat_statmode(&self) -> usize {
+        let mut _fs = self.fs.lock();
+        self.read_disk_inode(|node| node.get_statmode())
+    }
+
+    /// fstat_nlink
+    /// 获取文件类型
+    /// return
+    ///     1 :File
+    ///     2 :Directory
+    pub fn fstat_nlink(&self) -> u32 {
+        let mut _fs = self.fs.lock();
+        self.read_disk_inode(|node| node.refcont)
+    }
+
+    /// fstat_nlink
+    /// 获取文件inode id
+    pub fn fstat_inode_id(&self) -> u64 {
+        let block_begin = self.fs.lock().inode_area_start_block as usize;
+
+        let inode_size = core::mem::size_of::<DiskInode>();
+        let inodes_per_block = BLOCK_SZ / inode_size;
+        let r = (self.block_id - block_begin) * inodes_per_block + self.block_offset / inode_size;
+        r as u64
     }
 }

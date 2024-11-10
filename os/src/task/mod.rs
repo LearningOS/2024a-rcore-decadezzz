@@ -21,15 +21,15 @@ mod switch;
 #[allow(clippy::module_inception)]
 #[allow(rustdoc::private_intra_doc_links)]
 mod task;
-
+use crate::config::MAX_SYSCALL_NUM;
 use crate::fs::{open_file, OpenFlags};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;
+use crate::mm::translated_str;
 pub use manager::{fetch_task, TaskManager};
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
-
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 pub use manager::add_task;
 pub use processor::{
@@ -119,4 +119,71 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+/// Increase the sys call count
+pub fn increase_sys_call(sys_id: usize) {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .increase_sys_call(sys_id)
+}
+
+/// return the sys count array of the current task
+pub fn get_sys_call_times() -> [u32; MAX_SYSCALL_NUM] {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_sys_call_times()
+}
+
+/// return the sys count array of the current task
+pub fn get_task_run_times() -> usize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .get_task_run_times()
+}
+
+/// select_cur_task_to_mmap
+pub fn select_cur_task_to_mmap(start: usize, len: usize, port: usize) -> isize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .mmap(start, len, port)
+}
+
+/// select_cur_task_to_mmap
+pub fn select_cur_task_to_munmap(start: usize, len: usize) -> isize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .munmap(start, len)
+}
+
+/// _spawn
+pub fn _spawn(_path: *const u8)->isize{
+
+    let current_task = current_task();
+    if current_task.is_none() {
+        return -1;
+    }
+    let current_task = current_task.unwrap();
+
+    let  mut current_inner = current_task.inner_exclusive_access();
+    let token = current_inner.memory_set.token();
+    
+    let path = translated_str(token, _path);
+    
+    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+        let all_data = app_inode.read_all();
+        let data = all_data.as_slice();
+        print!("elf:{} path:{}\n",data.len(),path.as_str());
+        let child_block = Arc::new(TaskControlBlock::new(data));
+        let mut child_inner = child_block.inner_exclusive_access();
+        child_inner.parent = Some(Arc::downgrade(&current_task));
+        current_inner.children.push(child_block.clone());
+        add_task(child_block.clone());
+        return child_block.pid.0 as isize;
+    }
+    -1
 }

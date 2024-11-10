@@ -1,6 +1,6 @@
 //! File and filesystem-related syscalls
-use crate::fs::{open_file, OpenFlags, Stat};
-use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
+use crate::fs::{linkat, open_file, unlinkat, OpenFlags, Stat};
+use crate::mm::{translated_byte_buffer, translated_str, UserBuffer,translated_refmut};
 use crate::task::{current_task, current_user_token};
 
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
@@ -81,7 +81,20 @@ pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
         "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let stat = translated_refmut(current_user_token(), _st);
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    if _fd >= inner.fd_table.len() {
+        debug!("too big fd!");
+        return -1;
+    }
+    match &inner.fd_table[_fd] {
+        Some(file) => {
+            let file = file.clone();
+            file.fstat(stat)
+        }
+        None => -1,
+    }
 }
 
 /// YOUR JOB: Implement linkat.
@@ -90,7 +103,14 @@ pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
         "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let token = current_user_token();
+    let old_name = translated_str(token, _old_name);
+    let new_name = translated_str(token, _new_name);
+    if old_name.eq(new_name.as_str()) {
+        return -1;
+    }
+    linkat(old_name.as_str(), new_name.as_str())
+    
 }
 
 /// YOUR JOB: Implement unlinkat.
@@ -99,5 +119,8 @@ pub fn sys_unlinkat(_name: *const u8) -> isize {
         "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let token = current_user_token();
+    let name = translated_str(token, _name);
+
+    unlinkat(name.as_str())
 }
