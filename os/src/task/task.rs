@@ -6,7 +6,8 @@ use crate::trap::TrapContext;
 use crate::{mm::PhysPageNum, sync::UPSafeCell};
 use alloc::sync::{Arc, Weak};
 use core::cell::RefMut;
-
+use alloc::vec::Vec;
+use alloc::vec;
 /// Task control block structure
 pub struct TaskControlBlock {
     /// immutable
@@ -41,6 +42,14 @@ pub struct TaskControlBlockInner {
     pub task_status: TaskStatus,
     /// It is set when active exit or execution error occurs
     pub exit_code: Option<i32>,
+    /// m_allocation
+    pub m_allocation: Vec<usize>,
+    /// s_allocation
+    pub s_allocation: Vec<usize>,
+    /// m_need
+    pub m_need: Vec<usize>,
+    /// s_need
+    pub s_need: Vec<usize>,
 }
 
 impl TaskControlBlockInner {
@@ -51,6 +60,41 @@ impl TaskControlBlockInner {
     #[allow(unused)]
     fn get_status(&self) -> TaskStatus {
         self.task_status
+    }
+     /// increase.m_allocation
+     pub fn adjust_m_allocation(&mut self, target_id: usize, num: usize) {
+        let desired_length = target_id + 1; // 指定的长度
+        if self.m_allocation.len() < desired_length {
+            self.m_allocation.resize(desired_length, 0);
+        }
+        self.m_allocation[target_id] += num;
+    }
+
+    /// increase.s_allocation
+    pub fn adjust_s_allocation(&mut self, target_id: usize, num: usize) {
+        let desired_length = target_id + 1; // 指定的长度
+        if self.s_allocation.len() < desired_length {
+            self.s_allocation.resize(desired_length, 0);
+        }
+        self.s_allocation[target_id] += num;
+    }
+
+    /// increase.m_need
+    pub fn adjust_m_need(&mut self, target_id: usize, num: usize) {
+        let desired_length = target_id + 1; // 指定的长度
+        if self.m_need.len() < desired_length {
+            self.m_need.resize(desired_length, 0);
+        }
+        self.m_need[target_id] += num;
+    }
+
+    /// increase.s_need
+    pub fn adjust_s_need(&mut self, target_id: usize, num: usize) {
+        let desired_length = target_id + 1; // 指定的长度
+        if self.s_need.len() < desired_length {
+            self.s_need.resize(desired_length, 0);
+        }
+        self.s_need[target_id] += num;
     }
 }
 
@@ -65,6 +109,7 @@ impl TaskControlBlock {
         let trap_cx_ppn = res.trap_cx_ppn();
         let kstack = kstack_alloc();
         let kstack_top = kstack.get_top();
+        let process_inner = process.inner_exclusive_access();
         Self {
             process: Arc::downgrade(&process),
             kstack,
@@ -75,10 +120,15 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
+                    m_allocation: vec![0;process_inner.mutex_list.len()],
+                    s_allocation: vec![0;process_inner.semaphore_list.len()],
+                    m_need: vec![0;process_inner.mutex_list.len()],
+                    s_need: vec![0;process_inner.semaphore_list.len()],
                 })
             },
         }
     }
+
 }
 
 #[derive(Copy, Clone, PartialEq)]
